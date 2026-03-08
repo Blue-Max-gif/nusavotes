@@ -1,0 +1,39 @@
+Create a full online voting system called "NUSA Awards" using Supabase as the backend and React (or Next.js) as the frontend. 
+
+Requirements:
+
+1. Organization: NUSA
+2. Users can vote for at least 3 candidates. Include dummy candidate names if needed.
+3. Users can vote unlimited times (no restrictions per user).
+4. Each vote costs 10 Ksh, but the payment is prompted **after the voting is complete**, based on the total number of votes.
+5. After voting, calculate the total amount (total votes × 10 Ksh) and prompt the user to pay using **M-Pesa Daraja API STK Push**.
+6. Integrate payment securely using **Supabase Edge Functions**. Store M-Pesa API credentials as Supabase secrets:
+   - MPESA_CONSUMER_KEY
+   - MPESA_CONSUMER_SECRET
+   - MPESA_SHORTCODE
+   - MPESA_PASSKEY
+7. Create a **callback Edge Function** to handle payment confirmation from M-Pesa and update the database accordingly.
+8. Database schema in Supabase:
+   - Users (id, full_name, phone, created_at)
+   - Candidates (id, name, description)
+   - Votes (id, user_id, candidate_id, vote_count, status, created_at)
+   - Payments (id, user_id, total_votes, amount, payment_status, mpesa_receipt, created_at)
+9. Ensure that after payment confirmation, votes are marked as valid (paid).
+10. Frontend should display:
+    - Candidate list
+    - Voting buttons for each candidate
+    - Vote count per candidate
+    - Input for user's phone number
+    - Total votes calculated
+    - Payment button triggered after voting
+    - Payment confirmation status
+11. Use best practices for secure handling of API credentials and webhook validation.
+12. Ensure multiple users can vote independently, votes are unlimited, and payment is requested only after voting is complete.
+13. Provide:
+    - SQL statements to create tables
+    - Supabase Edge Functions (STK Push + callback)
+    - React frontend code
+    - Instructions for adding M-Pesa Daraja API credentials in Supabase
+    - Deployment instructions for Supabase Edge Functions and frontend
+
+ Make the UI clean and user-friendly, showing live vote counts and total payment before payment is triggered.

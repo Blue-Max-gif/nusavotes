@@ -5,28 +5,15 @@ import { storage } from "./storage";
 import { insertVoterSchema } from "@shared/schema";
 import { z } from "zod";
 
-async function getMpesaAccessToken(): Promise<string> {
-  const consumerKey = process.env.MPESA_CONSUMER_KEY;
-  const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
-  if (!consumerKey || !consumerSecret) throw new Error("M-Pesa credentials not configured");
-  const credentials = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
-  const response = await axios.get(
-    "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-    { headers: { Authorization: `Basic ${credentials}` } }
-  );
-  return response.data.access_token;
+function getPaylorBaseUrl() {
+  return process.env.PAYLOR_BASE_URL || "https://apipaylor.webnixke.com/api/v1";
 }
 
-function getTimestamp(): string {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getHours()).padStart(2, "0"),
-    String(now.getMinutes()).padStart(2, "0"),
-    String(now.getSeconds()).padStart(2, "0"),
-  ].join("");
+function normalizePhone(phone: string): string {
+  let normalized = phone.replace(/\s+/g, "");
+  if (normalized.startsWith("0")) normalized = "254" + normalized.slice(1);
+  if (normalized.startsWith("+")) normalized = normalized.slice(1);
+  return normalized;
 }
 
 const submitVotesSchema = z.object({
@@ -90,61 +77,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }));
       await storage.createVotes(voteItems);
 
-      // Attempt STK Push
+      // Attempt Paylor STK Push
       try {
-        const token = await getMpesaAccessToken();
-        const shortcode = process.env.MPESA_SHORTCODE!;
-        const passkey = process.env.MPESA_PASSKEY!;
-        const timestamp = getTimestamp();
-        const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
+        const apiKey = process.env.PAYLOR_API_KEY;
+        const channelId = process.env.PAYLOR_CHANNEL_ID;
+        if (!apiKey || !channelId) {
+          return res.json({
+            payment_id: payment.id,
+            total_votes: totalVotes,
+            amount,
+            status: "credentials_missing",
+            message: "Paylor API key or channel ID not configured. Votes recorded, payment pending.",
+          });
+        }
 
-        let normalizedPhone = phone.replace(/\s+/g, "");
-        if (normalizedPhone.startsWith("0")) normalizedPhone = "254" + normalizedPhone.slice(1);
-        else if (normalizedPhone.startsWith("+")) normalizedPhone = normalizedPhone.slice(1);
-
-        const host = (req.headers.host || "localhost:5000").replace("localhost", "0.0.0.0");
-        const protocol = req.headers["x-forwarded-proto"] || "https";
-        const callbackUrl = `${protocol}://${host}/api/payments/callback`;
-
-        const stkRes = await axios.post(
-          "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+        const normalizedPhone = normalizePhone(phone);
+        const callbackUrl = process.env.PAYLOR_CALLBACK_URL 
+          ? `${process.env.PAYLOR_CALLBACK_URL}/api/payments/callback`
+          : `${req.protocol}://${req.get("host")}/api/payments/callback`;
+        const paylorRes = await axios.post(
+          `${getPaylorBaseUrl()}/merchants/payments/stk-push`,
           {
-            BusinessShortCode: shortcode,
-            Password: password,
-            Timestamp: timestamp,
-            TransactionType: "CustomerPayBillOnline",
-            Amount: Math.ceil(amount),
-            PartyA: normalizedPhone,
-            PartyB: shortcode,
-            PhoneNumber: normalizedPhone,
-            CallBackURL: callbackUrl,
-            AccountReference: "NUSA-AWARDS",
-            TransactionDesc: `NUSA Awards: ${totalVotes} vote${totalVotes > 1 ? "s" : ""}`,
+            phone: normalizedPhone,
+            amount: Math.ceil(amount),
+            reference: `NUSA-${payment.id}`,
+            channelId,
+            callbackUrl,
+            description: `NUSA Awards votes: ${totalVotes}`,
           },
-          { headers: { Authorization: `Bearer ${token}` } }
+          {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+          },
         );
 
-        const { CheckoutRequestID, MerchantRequestID } = stkRes.data;
-        await storage.updatePaymentCheckoutId(payment.id, CheckoutRequestID, MerchantRequestID);
+        const transactionId = paylorRes.data.transactionId || paylorRes.data.transaction_id || "";
+        await storage.updatePaymentCheckoutId(payment.id, transactionId, transactionId);
 
         return res.json({
           payment_id: payment.id,
-          checkout_request_id: CheckoutRequestID,
+          checkout_request_id: transactionId,
           total_votes: totalVotes,
           amount,
           status: "stk_pushed",
           message: "STK Push sent. Check your phone to complete payment.",
         });
-      } catch (mpesaErr: any) {
-        const missing = mpesaErr.message === "M-Pesa credentials not configured";
+      } catch (paylorErr: any) {
         return res.json({
           payment_id: payment.id,
           total_votes: totalVotes,
           amount,
-          status: missing ? "credentials_missing" : "stk_failed",
-          message: missing
-            ? "M-Pesa credentials not yet configured. Votes recorded, payment pending."
-            : `STK Push error: ${mpesaErr.message}`,
+          status: "stk_failed",
+          message: `STK Push error: ${paylorErr?.response?.data?.message || paylorErr.message || "Unknown"}`,
         });
       }
     } catch (err: any) {
@@ -155,20 +141,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // POST /api/payments/callback - M-Pesa webhook
   app.post("/api/payments/callback", async (req: Request, res: Response) => {
     try {
-      const body = req.body?.Body?.stkCallback;
-      if (!body) return res.json({ ResultCode: 0 });
-      const { CheckoutRequestID, ResultCode, CallbackMetadata } = body;
-      const payment = await storage.getPaymentByCheckoutRequestId(CheckoutRequestID);
-      if (!payment) return res.json({ ResultCode: 0 });
-      if (ResultCode === 0) {
-        const items: any[] = CallbackMetadata?.Item || [];
-        const receipt = items.find(i => i.Name === "MpesaReceiptNumber")?.Value || "";
-        await storage.updatePaymentStatus(payment.id, "paid", receipt);
+      const event = req.body?.event;
+      const transaction = req.body?.transaction;
+      if (!event || !transaction) return res.status(400).json({ error: "Invalid payload" });
+
+      const transactionId = transaction.id;
+      const payment = await storage.getPaymentByCheckoutRequestId(transactionId);
+      if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+      if (event === "payment.success" || transaction.status === "COMPLETED") {
+        await storage.updatePaymentStatus(payment.id, "paid", transaction.providerRef || transactionId);
         await storage.markVotesPaid(payment.id);
       } else {
         await storage.updatePaymentStatus(payment.id, "failed");
       }
-      res.json({ ResultCode: 0 });
+
+      res.json({ received: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -177,7 +165,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // GET /api/payments/:id
   app.get("/api/payments/:id", async (req: Request, res: Response) => {
     try {
-      const payment = await storage.getPayment(req.params.id);
+      const paymentId = String(req.params.id);
+      const payment = await storage.getPayment(paymentId);
       if (!payment) return res.status(404).json({ error: "Not found" });
       res.json(payment);
     } catch (err: any) {
@@ -188,29 +177,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // POST /api/payments/:id/verify
   app.post("/api/payments/:id/verify", async (req: Request, res: Response) => {
     try {
-      const payment = await storage.getPayment(req.params.id);
+      const paymentId = String(req.params.id);
+      const payment = await storage.getPayment(paymentId);
       if (!payment) return res.status(404).json({ error: "Not found" });
       if (payment.payment_status === "paid") return res.json({ status: "paid", payment });
       if (!payment.mpesa_checkout_request_id) return res.json({ status: payment.payment_status, payment });
 
       try {
-        const token = await getMpesaAccessToken();
-        const shortcode = process.env.MPESA_SHORTCODE!;
-        const passkey = process.env.MPESA_PASSKEY!;
-        const timestamp = getTimestamp();
-        const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
-        const queryRes = await axios.post(
-          "https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query",
-          { BusinessShortCode: shortcode, Password: password, Timestamp: timestamp, CheckoutRequestID: payment.mpesa_checkout_request_id },
-          { headers: { Authorization: `Bearer ${token}` } }
+        const apiKey = process.env.PAYLOR_API_KEY;
+        if (!apiKey || !payment.mpesa_checkout_request_id) {
+          return res.json({ status: payment.payment_status, payment });
+        }
+
+        const transactionId = payment.mpesa_checkout_request_id;
+        const queryRes = await axios.get(
+          `${getPaylorBaseUrl()}/merchants/payments/transactions/${transactionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+          },
         );
-        if (queryRes.data.ResultCode === "0") {
-          await storage.updatePaymentStatus(payment.id, "paid");
+
+        const tx = queryRes.data || {};
+        if (tx.status === "COMPLETED" || tx.status === "SUCCESS") {
+          await storage.updatePaymentStatus(payment.id, "paid", tx.providerRef || transactionId);
           await storage.markVotesPaid(payment.id);
           return res.json({ status: "paid", payment: await storage.getPayment(payment.id) });
         }
+
         return res.json({ status: "pending", payment });
-      } catch (_) {
+      } catch (err: any) {
         return res.json({ status: payment.payment_status, payment });
       }
     } catch (err: any) {

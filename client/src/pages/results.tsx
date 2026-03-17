@@ -56,7 +56,7 @@ export default function Results() {
   });
 
   const totalVotes = candidates.reduce((sum, c) => sum + c.total_votes, 0);
-  const categories = [...new Set(candidates.map(c => c.category))];
+  const categories = [...new Set(candidates.map((c: CandidateWithVotes) => c.category))];
 
   const grouped = categories.reduce((acc, cat) => {
     acc[cat] = [...candidates.filter(c => c.category === cat)].sort((a, b) => b.total_votes - a.total_votes);
@@ -132,7 +132,7 @@ export default function Results() {
               const cfg = getCategoryConfig(cat);
               const CatIcon = cfg.icon;
               const catCandidates = grouped[cat] || [];
-              const catTotal = catCandidates.reduce((s, c) => s + c.total_votes, 0);
+              const catTotal = catCandidates.reduce((s: number, c: CandidateWithVotes) => s + c.total_votes, 0);
               const leader = catCandidates[0];
 
               return (

@@ -63,6 +63,7 @@ export default function Home() {
   const [session, setSession] = useState<VoteSession | null>(null);
   const [paymentRecord, setPaymentRecord] = useState<PaymentRecord | null>(null);
   const [polling, setPolling] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const { data: candidates = [], isLoading } = useQuery<CandidateWithVotes[]>({
     queryKey: ["/api/candidates"],
@@ -70,8 +71,8 @@ export default function Home() {
 
   const totalVotes = Object.values(selections).reduce((s, v) => s + v, 0);
   const totalAmount = totalVotes * 10;
-  const categories = [...new Set(candidates.map(c => c.category))];
-  const maxVotes = Math.max(...candidates.map(c => c.total_votes), 1);
+  const categories = [...new Set(candidates.map((c: CandidateWithVotes) => c.category))];
+  const maxVotes = Math.max(...candidates.map((c: CandidateWithVotes) => c.total_votes), 1);
 
   const grouped = categories.reduce((acc, cat) => {
     acc[cat] = candidates.filter(c => c.category === cat);
@@ -125,14 +126,25 @@ export default function Home() {
         setPaymentRecord(data.payment);
         setStep("confirm");
         setPolling(false);
+        setPaymentError(null);
         qc.invalidateQueries({ queryKey: ["/api/candidates"] });
         toast({ title: "Payment confirmed!", description: "Your votes have been recorded!" });
+      } else if (data.status === "failed") {
+        setPolling(false);
+        setPaymentError("Payment verification failed. Please check your M-Pesa status.");
+        toast({ title: "Payment Failed", description: "The payment was not successful.", variant: "destructive" });
+      } else {
+        toast({ title: "Payment Pending", description: "Still waiting for payment confirmation." });
       }
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: "Failed to verify payment: " + err.message, variant: "destructive" });
     },
   });
 
   function startPolling(paymentId: string) {
     setPolling(true);
+    setPaymentError(null);
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
@@ -145,10 +157,19 @@ export default function Home() {
           setPaymentRecord(payment);
           setStep("confirm");
           qc.invalidateQueries({ queryKey: ["/api/candidates"] });
+        } else if (payment.payment_status === "failed") {
+          clearInterval(interval);
+          setPolling(false);
+          setPaymentError("Payment failed. Please try again.");
+          toast({ title: "Payment Failed", description: "M-Pesa payment was unsuccessful.", variant: "destructive" });
         }
       } catch (_) {}
-      if (attempts >= 12) { clearInterval(interval); setPolling(false); }
-    }, 5000);
+      if (attempts >= 15) { 
+        clearInterval(interval); 
+        setPolling(false); 
+        setPaymentError("Payment polling timed out. Please click 'Verify Now' to check status manually.");
+      }
+    }, 4000);
   }
 
   function updateVote(candidateId: string, delta: number) {
@@ -174,6 +195,7 @@ export default function Home() {
   function resetApp() {
     setStep("register"); setFullName(""); setPhone(""); setVoterId(null);
     setSelections({}); setSession(null); setPaymentRecord(null); setPolling(false);
+    setPaymentError(null);
   }
 
   return (
@@ -339,7 +361,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {(grouped[cat] || []).map(candidate => {
+                        {(grouped[cat] || []).map((candidate: CandidateWithVotes) => {
                           const count = selections[candidate.id] || 0;
                           return (
                             <Card
@@ -502,6 +524,15 @@ export default function Home() {
                     <div>
                       <p className="text-sm font-medium text-destructive">STK Push failed</p>
                       <p className="text-xs text-muted-foreground">{session.message}</p>
+                    </div>
+                  </div>
+                )}
+                {paymentError && (
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-destructive/10 border border-destructive/20">
+                    <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-destructive">Payment Issue</p>
+                      <p className="text-xs text-muted-foreground">{paymentError}</p>
                     </div>
                   </div>
                 )}

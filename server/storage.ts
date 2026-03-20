@@ -51,49 +51,81 @@ export class MongoStorage implements IStorage {
     this.votes = this.db.collection<Vote>("votes");
     this.payments = this.db.collection<Payment>("payments");
 
-    // ✅ Seed candidates with real categories
+    // Seed real candidates if empty
     const count = await this.candidates.countDocuments();
-
     if (count === 0) {
-      const categories = [
-        "Most Impactful NUSA Patron",
-        "Exemplary Leadership Award",
-        "Mentorship Personality of the Year",
-        "Chapter Rep of the Year",
-        "Chapter of the Year",
-        "Sportsperson of the Year",
-        "Blogger/Writer of the Year",
-        "Outstanding Student with Disability",
-        "Patrons Award for Academic Excellence",
-        "NUSA Alumni of the Year",
-        "Activist of the Year",
-        "Best Student-Led Research Project",
-      ];
+      const categoriesWithCandidates: Record<string, { name: string; description: string }[]> = {
+        "Most Impactful NUSA Patron": [
+          { name: "Dr. John Mwangi", description: "Long-serving patron supporting student welfare" },
+          { name: "Prof. Jane Wanjiku", description: "Champion of student leadership and mentorship" },
+        ],
+        "Exemplary Leadership Award": [
+          { name: "Brian Otieno", description: "Student leader with outstanding impact" },
+          { name: "Mercy Atieno", description: "Led multiple successful student initiatives" },
+          { name: "Kevin Kiptoo", description: "Advocated for student rights and unity" },
+        ],
+        "Mentorship Personality of the Year": [
+          { name: "Lucy Njeri", description: "Dedicated mentor to young leaders" },
+          { name: "Samuel Ochieng", description: "Guided many students in career growth" },
+        ],
+        "Chapter Rep of the Year": [
+          { name: "Dennis Kariuki", description: "Active and impactful chapter representative" },
+          { name: "Faith Akinyi", description: "Strong voice for student concerns" },
+          { name: "Peter Mwangi", description: "Consistent and reliable leadership" },
+        ],
+        "Chapter of the Year": [
+          { name: "Egerton Chapter", description: "Most active and impactful chapter" },
+          { name: "Nairobi University Chapter", description: "Outstanding community involvement" },
+        ],
+        "Sportsperson of the Year": [
+          { name: "James Kipchoge", description: "Top performer in athletics" },
+          { name: "Allan Mutua", description: "Excelled in football competitions" },
+          { name: "Victor Wanyama Jr.", description: "Consistent sports excellence" },
+          { name: "Kelvin Otieno", description: "Outstanding team player" },
+        ],
+        "Blogger/Writer of the Year": [
+          { name: "Sharon Achieng", description: "Creative and impactful writer" },
+          { name: "David Kimani", description: "Top student blogger" },
+        ],
+        "Outstanding Student with Disability": [
+          { name: "Esther Wambui", description: "Inspiring resilience and excellence" },
+          { name: "Michael Onyango", description: "Academic and leadership excellence" },
+        ],
+        "Patrons Award for Academic Excellence": [
+          { name: "Grace Wanjiru", description: "Top academic performer" },
+          { name: "Daniel Kiprono", description: "Consistently high academic results" },
+          { name: "Ruth Chebet", description: "Excellence in research and studies" },
+        ],
+        "NUSA Alumni of the Year": [
+          { name: "Eng. Paul Mutiso", description: "Successful alumnus contributing to society" },
+          { name: "Dr. Anne Njeri", description: "Outstanding achievements post-graduation" },
+        ],
+        "Activist of the Year": [
+          { name: "Kevin Ouma", description: "Advocated for student rights" },
+          { name: "Brenda Atieno", description: "Led impactful campaigns" },
+          { name: "Allan Mwangi", description: "Voice for change and justice" },
+        ],
+        "Best Student-Led Research Project": [
+          { name: "AI Smart Farming Project", description: "Innovative agriculture solution" },
+          { name: "Campus Waste Recycling System", description: "Environmental sustainability project" },
+          { name: "Health Monitoring App", description: "Tech solution for student health" },
+          { name: "Smart Library System", description: "Digital transformation of libraries" },
+        ],
+      };
 
-      const initialCandidates: InsertCandidate[] = categories.flatMap(category => [
-        {
-          name: `${category} WILLIAM`,
-          description: `Nominee for ${category}`,
-          category,
-          photo_url: "",
-        },
-        {
-          name: `${category} OGENDO`,
-          description: `Nominee for ${category}`,
-          category,
-          photo_url: "",
-        },
-        {
-          name: `${category} BLUE`,
-          description: `Nominee for ${category}`,
-          category,
-          photo_url: "",
-        },
-      ]);
+      const initialCandidates: InsertCandidate[] = Object.entries(categoriesWithCandidates)
+        .flatMap(([category, nominees]) =>
+          nominees.map(nominee => ({
+            name: nominee.name,
+            description: nominee.description,
+            category,
+            photo_url: "",
+          }))
+        );
 
       await Promise.all(initialCandidates.map(c => this.createCandidate(c)));
     }
-  } // ✅ FIXED: this closing bracket was missing
+  }
 
   private async createCandidate(candidate: InsertCandidate): Promise<Candidate> {
     const newCandidate: Candidate = {
@@ -107,86 +139,49 @@ export class MongoStorage implements IStorage {
 
   async getVoter(id: string): Promise<Voter | undefined> {
     await this.initialized;
-    const voter = await this.voters.findOne({ id } as any);
-    return voter || undefined;
+    return (await this.voters.findOne({ id } as any)) || undefined;
   }
 
   async getVoterByPhone(phone: string): Promise<Voter | undefined> {
     await this.initialized;
-    const voter = await this.voters.findOne({ phone } as any);
-    return voter || undefined;
+    return (await this.voters.findOne({ phone } as any)) || undefined;
   }
 
   async createVoter(voter: InsertVoter): Promise<Voter> {
     await this.initialized;
-    const newVoter: Voter = {
-      ...voter,
-      id: randomUUID(),
-      created_at: new Date(),
-    };
+    const newVoter: Voter = { ...voter, id: randomUUID(), created_at: new Date() };
     await this.voters.insertOne(newVoter);
     return newVoter;
   }
 
   async getCandidates(): Promise<CandidateWithVotes[]> {
     await this.initialized;
-    const result = await this.candidates.aggregate([
+    return this.candidates.aggregate([
       {
         $lookup: {
           from: "votes",
           let: { candidateId: "$id" },
           pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$candidate_id", "$$candidateId"] },
-                    { $eq: ["$status", "paid"] }
-                  ]
-                }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                total: { $sum: "$vote_count" }
-              }
-            }
+            { $match: { $expr: { $and: [{ $eq: ["$candidate_id", "$$candidateId"] }, { $eq: ["$status", "paid"] }] } } },
+            { $group: { _id: null, total: { $sum: "$vote_count" } } },
           ],
-          as: "vote_summary"
-        }
+          as: "vote_summary",
+        },
       },
-      {
-        $addFields: {
-          total_votes: {
-            $ifNull: [{ $arrayElemAt: ["$vote_summary.total", 0] }, 0]
-          }
-        }
-      },
-      {
-        $sort: { total_votes: -1 }
-      }
-    ]).toArray();
-
-    return result as CandidateWithVotes[];
+      { $addFields: { total_votes: { $ifNull: [{ $arrayElemAt: ["$vote_summary.total", 0] }, 0] } } },
+      { $sort: { total_votes: -1 } },
+    ]).toArray() as Promise<CandidateWithVotes[]>;
   }
 
   async getCandidate(id: string): Promise<Candidate | undefined> {
     await this.initialized;
-    const candidate = await this.candidates.findOne({ id } as any);
-    return candidate || undefined;
+    return (await this.candidates.findOne({ id } as any)) || undefined;
   }
 
   async createVotes(voteItems: InsertVote[]): Promise<Vote[]> {
     await this.initialized;
-    const newVotes = voteItems.map(item => ({
-      ...item,
-      id: randomUUID(),
-      created_at: new Date(),
-    }));
-    if (newVotes.length > 0) {
-      await this.votes.insertMany(newVotes);
-    }
+    const newVotes = voteItems.map(item => ({ ...item, id: randomUUID(), created_at: new Date() }));
+    if (newVotes.length > 0) await this.votes.insertMany(newVotes);
     return newVotes;
   }
 
@@ -197,45 +192,31 @@ export class MongoStorage implements IStorage {
 
   async markVotesPaid(paymentId: string): Promise<void> {
     await this.initialized;
-    await this.votes.updateMany(
-      { payment_id: paymentId } as any,
-      { $set: { status: "paid" } }
-    );
+    await this.votes.updateMany({ payment_id: paymentId } as any, { $set: { status: "paid" } });
   }
 
   async createPayment(payment: InsertPayment): Promise<Payment> {
     await this.initialized;
-    const newPayment: Payment = {
-      ...payment,
-      id: randomUUID(),
-      created_at: new Date(),
-    };
+    const newPayment: Payment = { ...payment, id: randomUUID(), created_at: new Date() };
     await this.payments.insertOne(newPayment);
     return newPayment;
   }
 
   async getPayment(id: string): Promise<Payment | undefined> {
     await this.initialized;
-    const payment = await this.payments.findOne({ id } as any);
-    return payment || undefined;
+    return (await this.payments.findOne({ id } as any)) || undefined;
   }
 
   async getPaymentByCheckoutRequestId(checkoutRequestId: string): Promise<Payment | undefined> {
     await this.initialized;
-    const payment = await this.payments.findOne({ mpesa_checkout_request_id: checkoutRequestId } as any);
-    return payment || undefined;
+    return (await this.payments.findOne({ mpesa_checkout_request_id: checkoutRequestId } as any)) || undefined;
   }
 
   async updatePaymentStatus(id: string, status: string, receipt?: string): Promise<Payment | undefined> {
     await this.initialized;
     const update: any = { $set: { payment_status: status } };
     if (receipt) update.$set.mpesa_receipt = receipt;
-
-    const result = await this.payments.findOneAndUpdate(
-      { id } as any,
-      update,
-      { returnDocument: "after" }
-    );
+    const result = await this.payments.findOneAndUpdate({ id } as any, update, { returnDocument: "after" });
     return result || undefined;
   }
 

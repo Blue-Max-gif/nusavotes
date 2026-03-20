@@ -90,6 +90,7 @@ export class MongoStorage implements IStorage {
         "Outstanding Student with Disability": [
           { name: "Esther Wambui", description: "Inspiring resilience and excellence" },
           { name: "Michael Onyango", description: "Academic and leadership excellence" },
+          { name: "Malvin Odallo", description: "Empowering People, Transforming Lives" },
         ],
         "Patrons Award for Academic Excellence": [
           { name: "Grace Wanjiru", description: "Top academic performer" },

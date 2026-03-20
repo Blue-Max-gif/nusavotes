@@ -72,19 +72,19 @@ export class MongoStorage implements IStorage {
 
       const initialCandidates: InsertCandidate[] = categories.flatMap(category => [
         {
-          name: `${category} Nominee 1`,
+          name: `${category} WILLIAM`,
           description: `Nominee for ${category}`,
           category,
           photo_url: "",
         },
         {
-          name: `${category} Nominee 2`,
+          name: `${category} OGENDO`,
           description: `Nominee for ${category}`,
           category,
           photo_url: "",
         },
         {
-          name: `${category} Nominee 3`,
+          name: `${category} BLUE`,
           description: `Nominee for ${category}`,
           category,
           photo_url: "",

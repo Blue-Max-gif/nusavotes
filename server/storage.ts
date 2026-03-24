@@ -38,7 +38,7 @@ export class MongoStorage implements IStorage {
   private initialized: Promise<void>;
 
   constructor() {
-    const uri = process.env.DATABASE_URL || "mongodb://localhost:27017/nusavotes";
+    const uri = process.env.DATABASE_URL || "mongodb+srv://admin:admin@whatsapp-cluster.38vq8k0.mongodb.net/nusaward";
     this.client = new MongoClient(uri);
     this.initialized = this.init();
   }

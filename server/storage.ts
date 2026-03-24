@@ -105,7 +105,7 @@ export class MongoStorage implements IStorage {
     { name: "Meru University", description: "" },
     { name: "Mawego Technical", description: "" },
     { name: "JOOUST Chapter", description: "" },
-    { name: "Meru University", description: "" },
+    { name: "University Of Nairobi", description: "" },
   ],
 
   "Blogger of the Year": [
